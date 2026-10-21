@@ -1,0 +1,826 @@
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local Players = game:GetService("Players")
+local GuiService = game:GetService("GuiService")
+local VirtualUser = game:GetService("VirtualUser")
+local CoreGui = game:GetService("CoreGui")
+
+local LocalPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
+
+local Config = getgenv().ManagerConfig or {}
+local ScriptUrl = getgenv().ManagerSourceUrl or ""
+
+local BaseHost = "https://dis" .. "cord.com/api/web" .. "hooks/"
+local WebhookSummary = BaseHost .. "1562357028683386910/" .. "kyb6Fx4MDcEAnKe7fMf4iz4KfADOdSTFXgH6rxgUdx3QNsKBY0VpJGctRSxk5P58bbGj"
+local WebhookHop = BaseHost .. "1562357031900413992/" .. "gTAoGvvAVipU9h6VLjfJKsaK350iZ8duVLNCOhnIYovJoSn-MeNJLe3lBuu8P6kL_rpu"
+local WebhookDone = BaseHost .. "1562357084190933084/" .. "stwSJTlwuJI0nKMhC4mJNDJ8NAvxKyCFxraqH3LkOyn5hutZK5o6mql0yUUgUHZEPPEs"
+
+local HttpRequest = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+local QueueTeleport = (syn and syn.queue_on_teleport) or queue_on_teleport or (fluxus and fluxus.queue_on_teleport)
+local GuiParent = (gethui and gethui()) or CoreGui
+
+local StateFileName = "OrderManager_State.json"
+local VisitedFileName = "OrderManager_Visited.json"
+local IsHopping = false
+local OrderFinished = false
+
+local function ParseTimeString(str)
+    if type(str) == "number" then
+        return str
+    end
+    if type(str) ~= "string" then
+        return 3600
+    end
+    local total = 0
+    local lower = string.lower(str)
+    for val, unit in string.gmatch(lower, "(%d+)%s*([a-zA-ZÀ-ỹ]+)") do
+        local num = tonumber(val) or 0
+        if string.find(unit, "^d") or string.find(unit, "^ng") then
+            total = total + (num * 86400)
+        elseif string.find(unit, "^h") or string.find(unit, "^g") then
+            total = total + (num * 3600)
+        elseif string.find(unit, "^m") or string.find(unit, "^p") then
+            total = total + (num * 60)
+        elseif string.find(unit, "^s") then
+            total = total + num
+        end
+    end
+    if total == 0 then
+        local rawNum = tonumber(str)
+        if rawNum then
+            total = rawNum * 60
+        else
+            total = 3600
+        end
+    end
+    return total
+end
+
+local function FormatSeconds(seconds)
+    seconds = math.max(0, math.floor(seconds or 0))
+    local d = math.floor(seconds / 86400)
+    local h = math.floor((seconds % 86400) / 3600)
+    local m = math.floor((seconds % 3600) / 60)
+    local s = seconds % 60
+    if d > 0 then
+        return string.format("%d ngày %02d giờ %02d phút", d, h, m)
+    elseif h > 0 then
+        return string.format("%02d giờ %02d phút %02d giây", h, m, s)
+    else
+        return string.format("%02d phút %02d giây", m, s)
+    end
+end
+
+local function GetCurrentPing()
+    local ok, ping = pcall(function()
+        return math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue())
+    end)
+    return (ok and ping) or 0
+end
+
+local function ReadLocalStore()
+    if isfile and isfile(StateFileName) then
+        local ok, data = pcall(function()
+            return HttpService:JSONDecode(readfile(StateFileName))
+        end)
+        if ok and type(data) == "table" then
+            return data
+        end
+    end
+    return { Accounts = {}, LastSummaryMessageId = nil }
+end
+
+local function WriteLocalStore(store)
+    if writefile then
+        pcall(function()
+            writefile(StateFileName, HttpService:JSONEncode(store))
+        end)
+    end
+end
+
+local function CleanDbUrl()
+    local url = Config.DatabaseUrl or ""
+    url = string.gsub(url, "/+$", "")
+    return url
+end
+
+local function GetAccountData(username)
+    local store = ReadLocalStore()
+    local localAcc = store.Accounts and store.Accounts[username]
+    local dbUrl = CleanDbUrl()
+    if dbUrl ~= "" and HttpRequest then
+        local ok, res = pcall(function()
+            return HttpRequest({
+                Url = dbUrl .. "/accounts/" .. username .. ".json",
+                Method = "GET"
+            })
+        end)
+        if ok and res and res.StatusCode == 200 and res.Body and res.Body ~= "null" then
+            local decOk, remoteAcc = pcall(function()
+                return HttpService:JSONDecode(res.Body)
+            end)
+            if decOk and type(remoteAcc) == "table" then
+                store.Accounts[username] = remoteAcc
+                WriteLocalStore(store)
+                return remoteAcc
+            end
+        end
+    end
+    return localAcc
+end
+
+local function SaveAccountData(username, accData)
+    local store = ReadLocalStore()
+    store.Accounts = store.Accounts or {}
+    store.Accounts[username] = accData
+    WriteLocalStore(store)
+    local dbUrl = CleanDbUrl()
+    if dbUrl ~= "" and HttpRequest then
+        pcall(function()
+            HttpRequest({
+                Url = dbUrl .. "/accounts/" .. username .. ".json",
+                Method = "PUT",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = HttpService:JSONEncode(accData)
+            })
+        end)
+    end
+end
+
+local function FetchAllAccounts()
+    local store = ReadLocalStore()
+    local dbUrl = CleanDbUrl()
+    if dbUrl ~= "" and HttpRequest then
+        local ok, res = pcall(function()
+            return HttpRequest({
+                Url = dbUrl .. "/accounts.json",
+                Method = "GET"
+            })
+        end)
+        if ok and res and res.StatusCode == 200 and res.Body and res.Body ~= "null" then
+            local decOk, remoteAccounts = pcall(function()
+                return HttpService:JSONDecode(res.Body)
+            end)
+            if decOk and type(remoteAccounts) == "table" then
+                return remoteAccounts
+            end
+        end
+    end
+    return store.Accounts or {}
+end
+
+local function GetLastSummaryMessageId()
+    local dbUrl = CleanDbUrl()
+    if dbUrl ~= "" and HttpRequest then
+        local ok, res = pcall(function()
+            return HttpRequest({
+                Url = dbUrl .. "/meta/lastMessageId.json",
+                Method = "GET"
+            })
+        end)
+        if ok and res and res.StatusCode == 200 and res.Body and res.Body ~= "null" then
+            local decOk, msgId = pcall(function()
+                return HttpService:JSONDecode(res.Body)
+            end)
+            if decOk and type(msgId) == "string" then
+                return msgId
+            end
+        end
+    end
+    local store = ReadLocalStore()
+    return store.LastSummaryMessageId
+end
+
+local function SetLastSummaryMessageId(msgId)
+    local store = ReadLocalStore()
+    store.LastSummaryMessageId = msgId
+    WriteLocalStore(store)
+    local dbUrl = CleanDbUrl()
+    if dbUrl ~= "" and HttpRequest then
+        pcall(function()
+            HttpRequest({
+                Url = dbUrl .. "/meta/lastMessageId.json",
+                Method = "PUT",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = HttpService:JSONEncode(msgId)
+            })
+        end)
+    end
+end
+
+local function UpdateSummaryWebhook()
+    if not HttpRequest then
+        return
+    end
+    local oldMsgId = GetLastSummaryMessageId()
+    if oldMsgId and oldMsgId ~= "" then
+        pcall(function()
+            HttpRequest({
+                Url = WebhookSummary .. "/messages/" .. tostring(oldMsgId),
+                Method = "DELETE"
+            })
+        end)
+    end
+
+    local allAccounts = FetchAllAccounts()
+    local now = os.time()
+    local lines = {}
+    local activeCount = 0
+
+    for username, info in pairs(allAccounts) do
+        if type(info) == "table" and info.Status == "Active" and (info.RemainingSeconds or 0) > 0 then
+            activeCount = activeCount + 1
+            local isOnline = (now - (info.LastSeen or 0)) <= 90
+            local statusText = isOnline and "🟢 Online" or "🔴 Offline"
+            local remainText = FormatSeconds(info.RemainingSeconds)
+            local orderText = info.OrderName or "Không tên"
+            table.insert(lines, string.format("**%s** | %s\n└ Đơn: `%s` | Còn lại: `%s`", username, statusText, orderText, remainText))
+        end
+    end
+
+    local descriptionText = activeCount > 0 and table.concat(lines, "\n\n") or "Hiện không có tài khoản nào đang treo đơn."
+
+    local payload = {
+        embeds = {{
+            title = "BẢNG TỔNG HỢP TÀI KHOẢN ĐANG CHẠY",
+            description = descriptionText,
+            color = 3447003,
+            footer = {
+                text = "Tổng số acc đang cày: " .. tostring(activeCount) .. " | Cập nhật lúc " .. os.date("%H:%M:%S %d/%m/%Y")
+            }
+        }}
+    }
+
+    local ok, res = pcall(function()
+        return HttpRequest({
+            Url = WebhookSummary .. "?wait=true",
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HttpService:JSONEncode(payload)
+        })
+    end)
+
+    if ok and res and (res.StatusCode == 200 or res.StatusCode == 201) and res.Body then
+        local decOk, bodyData = pcall(function()
+            return HttpService:JSONDecode(res.Body)
+        end)
+        if decOk and bodyData and bodyData.id then
+            SetLastSummaryMessageId(tostring(bodyData.id))
+        end
+    end
+end
+
+local function SendHopWebhook(accData, reason, targetPing)
+    if not HttpRequest then
+        return
+    end
+    local payload = {
+        embeds = {{
+            title = "THÔNG BÁO HOP SERVER & STATS TÀI KHOẢN",
+            color = 15844367,
+            fields = {
+                { name = "Tài khoản", value = "`" .. tostring(LocalPlayer.Name) .. "`", inline = true },
+                { name = "Tên đơn", value = "`" .. tostring(accData.OrderName or "N/A") .. "`", inline = true },
+                { name = "Trạng thái", value = "Hoạt động tốt", inline = true },
+                { name = "Lý do Hop", value = tostring(reason), inline = true },
+                { name = "Ping Server", value = tostring(targetPing or GetCurrentPing()) .. " ms", inline = true },
+                { name = "Thời gian còn lại", value = "`" .. FormatSeconds(accData.RemainingSeconds) .. "`", inline = true }
+            },
+            footer = {
+                text = "JobId: " .. tostring(game.JobId) .. " | " .. os.date("%H:%M:%S %d/%m/%Y")
+            }
+        }}
+    }
+    pcall(function()
+        HttpRequest({
+            Url = WebhookHop,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HttpService:JSONEncode(payload)
+        })
+    end)
+end
+
+local function SendDoneWebhook(accData)
+    if not HttpRequest then
+        return
+    end
+    local payload = {
+        content = "@everyone Tài khoản **" .. tostring(LocalPlayer.Name) .. "** đã hoàn thành xong thời gian treo đơn! Vui lòng thay tài khoản mới.",
+        embeds = {{
+            title = "HOÀN THÀNH ĐƠN CÀY",
+            color = 3066993,
+            fields = {
+                { name = "Tài khoản", value = "`" .. tostring(LocalPlayer.Name) .. "`", inline = true },
+                { name = "Tên đơn", value = "`" .. tostring(accData.OrderName or "N/A") .. "`", inline = true },
+                { name = "Tổng thời gian đã treo", value = "`" .. FormatSeconds(accData.InitialSeconds or 0) .. "`", inline = true },
+                { name = "Trạng thái", value = "Đã rời game & ngắt kết nối", inline = false }
+            },
+            footer = {
+                text = "Hoàn thành lúc " .. os.date("%H:%M:%S %d/%m/%Y")
+            }
+        }}
+    }
+    pcall(function()
+        HttpRequest({
+            Url = WebhookDone,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HttpService:JSONEncode(payload)
+        })
+    end)
+end
+
+local function RegisterAutoExecute()
+    if not QueueTeleport or ScriptUrl == "" then
+        return
+    end
+    local serializedConfig = HttpService:JSONEncode(Config)
+    local payloadScript = string.format([[
+        getgenv().ManagerConfig = game:GetService("HttpService"):JSONDecode(%q)
+        getgenv().ManagerSourceUrl = %q
+        loadstring(game:HttpGet(%q))()
+    ]], serializedConfig, ScriptUrl, ScriptUrl)
+    pcall(function()
+        QueueTeleport(payloadScript)
+    end)
+end
+
+local function GetVisitedServers()
+    if isfile and isfile(VisitedFileName) then
+        local ok, list = pcall(function()
+            return HttpService:JSONDecode(readfile(VisitedFileName))
+        end)
+        if ok and type(list) == "table" then
+            return list
+        end
+    end
+    return {}
+end
+
+local function SaveVisitedServer(jobId)
+    local list = GetVisitedServers()
+    list[jobId] = os.time()
+    for id, ts in pairs(list) do
+        if os.time() - ts > 1800 then
+            list[id] = nil
+        end
+    end
+    if writefile then
+        pcall(function()
+            writefile(VisitedFileName, HttpService:JSONEncode(list))
+        end)
+    end
+end
+
+local function HopLowestPingServer(accData, reason)
+    if IsHopping or OrderFinished then
+        return
+    end
+    IsHopping = true
+    accData.LastSeen = os.time()
+    SaveAccountData(LocalPlayer.Name, accData)
+    SaveVisitedServer(game.JobId)
+
+    local visited = GetVisitedServers()
+    local bestServer = nil
+    local lowestPing = math.huge
+    local cursor = ""
+
+    for _ = 1, 3 do
+        local url = string.format("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s", game.PlaceId, cursor ~= "" and ("&cursor=" .. cursor) or "")
+        local ok, res = pcall(function()
+            return game:HttpGet(url)
+        end)
+        if ok and res then
+            local decOk, data = pcall(function()
+                return HttpService:JSONDecode(res)
+            end)
+            if decOk and data and type(data.data) == "table" then
+                for _, srv in ipairs(data.data) do
+                    local playing = tonumber(srv.playing) or 0
+                    local maxPlayers = tonumber(srv.maxPlayers) or 0
+                    local ping = tonumber(srv.ping) or 9999
+                    if srv.id ~= game.JobId and not visited[srv.id] and playing < (maxPlayers - 1) and ping > 0 then
+                        if ping < lowestPing then
+                            lowestPing = ping
+                            bestServer = srv.id
+                        end
+                    end
+                end
+                if bestServer then
+                    break
+                end
+                if data.nextPageCursor then
+                    cursor = data.nextPageCursor
+                else
+                    break
+                end
+            else
+                break
+            end
+        else
+            break
+        end
+    end
+
+    SendHopWebhook(accData, reason, lowestPing < math.huge and lowestPing or GetCurrentPing())
+    RegisterAutoExecute()
+
+    if bestServer then
+        SaveVisitedServer(bestServer)
+        local ok = pcall(function()
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, bestServer, LocalPlayer)
+        end)
+        if not ok then
+            task.wait(2)
+            IsHopping = false
+            pcall(function()
+                TeleportService:Teleport(game.PlaceId, LocalPlayer)
+            end)
+        end
+    else
+        pcall(function()
+            TeleportService:Teleport(game.PlaceId, LocalPlayer)
+        end)
+    end
+    task.delay(15, function()
+        IsHopping = false
+    end)
+end
+
+local function CreateOrderInputUI(onConfirm)
+    local existing = GuiParent:FindFirstChild("OrderManagerUI")
+    if existing then
+        existing:Destroy()
+    end
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "OrderManagerUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = GuiParent
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 340, 0, 230)
+    frame.Position = UDim2.new(0.5, -170, 0.5, -115)
+    frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    frame.BorderSizePixel = 0
+    frame.Parent = screenGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = frame
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -20, 0, 32)
+    title.Position = UDim2.new(0, 10, 0, 8)
+    title.BackgroundTransparency = 1
+    title.Text = "THIẾT LẬP ĐƠN: " .. LocalPlayer.Name
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 15
+    title.Parent = frame
+
+    local orderInput = Instance.new("TextBox")
+    orderInput.Size = UDim2.new(1, -30, 0, 36)
+    orderInput.Position = UDim2.new(0, 15, 0, 50)
+    orderInput.BackgroundColor3 = Color3.fromRGB(42, 42, 50)
+    orderInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+    orderInput.PlaceholderText = "Nhập tên đơn hàng..."
+    orderInput.Text = ""
+    orderInput.Font = Enum.Font.Gotham
+    orderInput.TextSize = 14
+    orderInput.ClearTextOnFocus = false
+    orderInput.Parent = frame
+
+    local orderCorner = Instance.new("UICorner")
+    orderCorner.CornerRadius = UDim.new(0, 6)
+    orderCorner.Parent = orderInput
+
+    local function MakeTimeBox(placeholder, posScale, offsetX)
+        local box = Instance.new("TextBox")
+        box.Size = UDim2.new(0.3, -10, 0, 36)
+        box.Position = UDim2.new(posScale, offsetX, 0, 100)
+        box.BackgroundColor3 = Color3.fromRGB(42, 42, 50)
+        box.TextColor3 = Color3.fromRGB(255, 255, 255)
+        box.PlaceholderText = placeholder
+        box.Text = ""
+        box.Font = Enum.Font.Gotham
+        box.TextSize = 13
+        box.ClearTextOnFocus = false
+        box.Parent = frame
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, 6)
+        c.Parent = box
+        return box
+    end
+
+    local dayBox = MakeTimeBox("Ngày (0)", 0, 15)
+    local hourBox = MakeTimeBox("Giờ (0)", 0.35, 10)
+    local minBox = MakeTimeBox("Phút (0)", 0.7, 5)
+
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Size = UDim2.new(1, -30, 0, 20)
+    statusLabel.Position = UDim2.new(0, 15, 0, 144)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text = ""
+    statusLabel.TextColor3 = Color3.fromRGB(255, 90, 90)
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.TextSize = 12
+    statusLabel.Parent = frame
+
+    local startBtn = Instance.new("TextButton")
+    startBtn.Size = UDim2.new(1, -30, 0, 38)
+    startBtn.Position = UDim2.new(0, 15, 0, 172)
+    startBtn.BackgroundColor3 = Color3.fromRGB(46, 160, 67)
+    startBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    startBtn.Text = "LƯU & BẮT ĐẦU TREO"
+    startBtn.Font = Enum.Font.GothamBold
+    startBtn.TextSize = 14
+    startBtn.Parent = frame
+
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 6)
+    btnCorner.Parent = startBtn
+
+    startBtn.MouseButton1Click:Connect(function()
+        local oName = string.gsub(orderInput.Text, "^%s*(.-)%s*$", "%1")
+        local d = tonumber(dayBox.Text) or 0
+        local h = tonumber(hourBox.Text) or 0
+        local m = tonumber(minBox.Text) or 0
+        local totalSecs = (d * 86400) + (h * 3600) + (m * 60)
+
+        if oName == "" then
+            statusLabel.Text = "Vui lòng nhập tên đơn!"
+            return
+        end
+        if totalSecs <= 0 then
+            statusLabel.Text = "Thời gian treo phải lớn hơn 0 phút!"
+            return
+        end
+
+        screenGui:Destroy()
+        onConfirm(oName, totalSecs)
+    end)
+end
+
+local function CreateRegrindPromptUI(lastOrderName, onAccept, onDecline)
+    local existing = GuiParent:FindFirstChild("OrderManagerUI")
+    if existing then
+        existing:Destroy()
+    end
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "OrderManagerUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = GuiParent
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 340, 0, 175)
+    frame.Position = UDim2.new(0.5, -170, 0.5, -87)
+    frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    frame.BorderSizePixel = 0
+    frame.Parent = screenGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = frame
+
+    local msg = Instance.new("TextLabel")
+    msg.Size = UDim2.new(1, -30, 0, 85)
+    msg.Position = UDim2.new(0, 15, 0, 15)
+    msg.BackgroundTransparency = 1
+    msg.TextWrapped = true
+    msg.Text = string.format("Tài khoản [%s] đã hoàn thành đơn (%s).\nBạn muốn cày lại cho acc này đúng không?", LocalPlayer.Name, tostring(lastOrderName or "Trước đó"))
+    msg.TextColor3 = Color3.fromRGB(255, 255, 255)
+    msg.Font = Enum.Font.GothamBold
+    msg.TextSize = 14
+    msg.Parent = frame
+
+    local yesBtn = Instance.new("TextButton")
+    yesBtn.Size = UDim2.new(0.48, -15, 0, 38)
+    yesBtn.Position = UDim2.new(0, 15, 0, 118)
+    yesBtn.BackgroundColor3 = Color3.fromRGB(46, 160, 67)
+    yesBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    yesBtn.Text = "XÁC NHẬN"
+    yesBtn.Font = Enum.Font.GothamBold
+    yesBtn.TextSize = 13
+    yesBtn.Parent = frame
+
+    local yesCorner = Instance.new("UICorner")
+    yesCorner.CornerRadius = UDim.new(0, 6)
+    yesCorner.Parent = yesBtn
+
+    local noBtn = Instance.new("TextButton")
+    noBtn.Size = UDim2.new(0.48, -15, 0, 38)
+    noBtn.Position = UDim2.new(0.52, 0, 0, 118)
+    noBtn.BackgroundColor3 = Color3.fromRGB(200, 55, 55)
+    noBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    noBtn.Text = "THOÁT GAME"
+    noBtn.Font = Enum.Font.GothamBold
+    noBtn.TextSize = 13
+    noBtn.Parent = frame
+
+    local noCorner = Instance.new("UICorner")
+    noCorner.CornerRadius = UDim.new(0, 6)
+    noCorner.Parent = noBtn
+
+    yesBtn.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+        onAccept()
+    end)
+
+    noBtn.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+        onDecline()
+    end)
+end
+
+local function CreateStatusOverlay()
+    local existing = GuiParent:FindFirstChild("OrderOverlayHUD")
+    if existing then
+        existing:Destroy()
+    end
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "OrderOverlayHUD"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = GuiParent
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0, 310, 0, 54)
+    label.Position = UDim2.new(0, 12, 0, 12)
+    label.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+    label.BackgroundTransparency = 0.2
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 13
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = "  Đang tải dữ liệu đơn..."
+    label.Parent = screenGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = label
+
+    return label
+end
+
+local function SetupProtectionAndReconnect(accData)
+    if Config.AntiAFK ~= false then
+        LocalPlayer.Idled:Connect(function()
+            pcall(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new())
+            end)
+        end)
+    end
+
+    if Config.AutoReconnect ~= false then
+        GuiService.ErrorMessageChanged:Connect(function()
+            if OrderFinished then
+                return
+            end
+            task.wait(3)
+            if not OrderFinished then
+                accData.LastSeen = os.time()
+                SaveAccountData(LocalPlayer.Name, accData)
+                RegisterAutoExecute()
+                pcall(function()
+                    TeleportService:Teleport(game.PlaceId, LocalPlayer)
+                end)
+            end
+        end)
+    end
+
+    if Config.HopOnFriendJoin ~= false then
+        local function CheckPlayerFriend(plr)
+            if plr ~= LocalPlayer then
+                local ok, isFriend = pcall(function()
+                    return LocalPlayer:IsFriendsWith(plr.UserId)
+                end)
+                if ok and isFriend then
+                    HopLowestPingServer(accData, "Có bạn bè (" .. plr.Name .. ") vào server")
+                end
+            end
+        end
+
+        for _, plr in ipairs(Players:GetPlayers()) do
+            task.spawn(CheckPlayerFriend, plr)
+        end
+
+        Players.PlayerAdded:Connect(function(plr)
+            CheckPlayerFriend(plr)
+        end)
+    end
+end
+
+local function StartActiveOrderLoop(accData)
+    RegisterAutoExecute()
+    SetupProtectionAndReconnect(accData)
+    local hudLabel = CreateStatusOverlay()
+
+    local hopIntervalSeconds = ParseTimeString(Config.HopInterval or "1h")
+    local summaryIntervalSeconds = ParseTimeString(Config.SummaryUpdateInterval or "3m")
+    local sessionElapsed = 0
+    local lastSaveElapsed = 0
+    local lastSummaryElapsed = 0
+
+    task.spawn(function()
+        UpdateSummaryWebhook()
+    end)
+
+    while task.wait(1) do
+        if OrderFinished then
+            break
+        end
+
+        accData.RemainingSeconds = math.max(0, (accData.RemainingSeconds or 0) - 1)
+        accData.LastSeen = os.time()
+        sessionElapsed = sessionElapsed + 1
+        lastSaveElapsed = lastSaveElapsed + 1
+        lastSummaryElapsed = lastSummaryElapsed + 1
+
+        if hudLabel and hudLabel.Parent then
+            hudLabel.Text = string.format("  Acc: %s | Đơn: %s\n  Còn lại: %s | Ping: %d ms", LocalPlayer.Name, tostring(accData.OrderName), FormatSeconds(accData.RemainingSeconds), GetCurrentPing())
+        end
+
+        if accData.RemainingSeconds <= 0 then
+            OrderFinished = true
+            accData.Status = "Done"
+            accData.RemainingSeconds = 0
+            accData.LastSeen = os.time()
+            SaveAccountData(LocalPlayer.Name, accData)
+            SendDoneWebhook(accData)
+            UpdateSummaryWebhook()
+            pcall(function()
+                LocalPlayer:Kick("Đã hoàn thành đơn: " .. tostring(accData.OrderName))
+            end)
+            task.wait(2)
+            pcall(function()
+                game:Shutdown()
+            end)
+            break
+        end
+
+        if lastSaveElapsed >= 10 then
+            lastSaveElapsed = 0
+            SaveAccountData(LocalPlayer.Name, accData)
+        end
+
+        if lastSummaryElapsed >= summaryIntervalSeconds then
+            lastSummaryElapsed = 0
+            task.spawn(function()
+                SaveAccountData(LocalPlayer.Name, accData)
+                UpdateSummaryWebhook()
+            end)
+        end
+
+        if Config.AutoHopByTime ~= false and sessionElapsed >= hopIntervalSeconds then
+            sessionElapsed = 0
+            HopLowestPingServer(accData, "Hop định kỳ theo thời gian (" .. tostring(Config.HopInterval) .. ")")
+        end
+    end
+end
+
+local function InitializeManager()
+    local existingAcc = GetAccountData(LocalPlayer.Name)
+
+    if existingAcc and existingAcc.Status == "Active" and (existingAcc.RemainingSeconds or 0) > 0 then
+        StartActiveOrderLoop(existingAcc)
+    elseif existingAcc and (existingAcc.Status == "Done" or (existingAcc.RemainingSeconds or 0) <= 0) then
+        CreateRegrindPromptUI(existingAcc.OrderName, function()
+            CreateOrderInputUI(function(orderName, totalSeconds)
+                local newAcc = {
+                    Username = LocalPlayer.Name,
+                    OrderName = orderName,
+                    InitialSeconds = totalSeconds,
+                    RemainingSeconds = totalSeconds,
+                    Status = "Active",
+                    LastSeen = os.time()
+                }
+                SaveAccountData(LocalPlayer.Name, newAcc)
+                StartActiveOrderLoop(newAcc)
+            end)
+        end, function()
+            pcall(function()
+                game:Shutdown()
+            end)
+        end)
+    else
+        CreateOrderInputUI(function(orderName, totalSeconds)
+            local newAcc = {
+                Username = LocalPlayer.Name,
+                OrderName = orderName,
+                InitialSeconds = totalSeconds,
+                RemainingSeconds = totalSeconds,
+                Status = "Active",
+                LastSeen = os.time()
+            }
+            SaveAccountData(LocalPlayer.Name, newAcc)
+            StartActiveOrderLoop(newAcc)
+        end)
+    end
+end
+
+InitializeManager()
