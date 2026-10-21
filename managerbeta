@@ -281,7 +281,7 @@ local function SendHopWebhook(accData, reason, targetPing)
                 { name = "Tên đơn", value = "`" .. tostring(accData.OrderName or "N/A") .. "`", inline = true },
                 { name = "Trạng thái", value = "Hoạt động tốt", inline = true },
                 { name = "Lý do Hop", value = tostring(reason), inline = true },
-                { name = "Ping Server", value = tostring(targetPing or GetCurrentPing()) .. " ms", inline = true },
+                { name = "Ping hiện tại trước hop", value = tostring(targetPing or GetCurrentPing()) .. " ms", inline = true },
                 { name = "Thời gian còn lại", value = "`" .. FormatSeconds(accData.RemainingSeconds) .. "`", inline = true }
             },
             footer = {
@@ -382,7 +382,8 @@ local function HopLowestPingServer(accData, reason)
 
     local visited = GetVisitedServers()
     local bestServer = nil
-    local lowestPing = math.huge
+    local bestOccupancy = math.huge
+    local bestPlaying = math.huge
     local cursor = ""
 
     for _ = 1, 3 do
@@ -398,16 +399,14 @@ local function HopLowestPingServer(accData, reason)
                 for _, srv in ipairs(data.data) do
                     local playing = tonumber(srv.playing) or 0
                     local maxPlayers = tonumber(srv.maxPlayers) or 0
-                    local ping = tonumber(srv.ping) or 9999
-                    if srv.id ~= game.JobId and not visited[srv.id] and playing < (maxPlayers - 1) and ping > 0 then
-                        if ping < lowestPing then
-                            lowestPing = ping
+                    if type(srv.id) == "string" and srv.id ~= game.JobId and not visited[srv.id] and maxPlayers > 0 and playing < (maxPlayers - 1) then
+                        local occupancy = playing / maxPlayers
+                        if occupancy < bestOccupancy or (occupancy == bestOccupancy and playing < bestPlaying) then
+                            bestOccupancy = occupancy
+                            bestPlaying = playing
                             bestServer = srv.id
                         end
                     end
-                end
-                if bestServer then
-                    break
                 end
                 if data.nextPageCursor then
                     cursor = data.nextPageCursor
@@ -422,7 +421,7 @@ local function HopLowestPingServer(accData, reason)
         end
     end
 
-    SendHopWebhook(accData, reason, lowestPing < math.huge and lowestPing or GetCurrentPing())
+    SendHopWebhook(accData, reason, GetCurrentPing())
     RegisterAutoExecute()
 
     if bestServer then
