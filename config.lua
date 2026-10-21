@@ -9,8 +9,6 @@ env.ManagerConfig = {
     AutoHopByTime = true,
     HopInterval = "1h 30m",
     HopOnFriendJoin = true,
-    AntiAFK = true,
-    AutoReconnect = true,
     SummaryUpdateInterval = "3m",
     DatabaseUrl = ""
 }
