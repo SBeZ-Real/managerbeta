@@ -1,8 +1,6 @@
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
-local GuiService = game:GetService("GuiService")
-local VirtualUser = game:GetService("VirtualUser")
 local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
@@ -667,32 +665,6 @@ local function CreateStatusOverlay()
 end
 
 local function SetupProtectionAndReconnect(accData)
-    if Config.AntiAFK ~= false then
-        LocalPlayer.Idled:Connect(function()
-            pcall(function()
-                VirtualUser:CaptureController()
-                VirtualUser:ClickButton2(Vector2.new())
-            end)
-        end)
-    end
-
-    if Config.AutoReconnect ~= false then
-        GuiService.ErrorMessageChanged:Connect(function()
-            if OrderFinished then
-                return
-            end
-            task.wait(3)
-            if not OrderFinished then
-                accData.LastSeen = os.time()
-                SaveAccountData(LocalPlayer.Name, accData)
-                RegisterAutoExecute()
-                pcall(function()
-                    TeleportService:Teleport(game.PlaceId, LocalPlayer)
-                end)
-            end
-        end)
-    end
-
     if Config.HopOnFriendJoin ~= false then
         local function CheckPlayerFriend(plr)
             if plr ~= LocalPlayer then
