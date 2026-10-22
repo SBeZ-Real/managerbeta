@@ -4,33 +4,47 @@ if type(getgenv) ~= "function" then
 end
 
 local env = getgenv()
+local config = env.ManagerConfig or {}
+local apiBaseUrl = tostring(config.ApiBaseUrl or ""):gsub("/+$", "")
+local sourceKey = tostring(config.SourceAccessKey or "")
 
-env.ManagerConfig = {
-    AutoHopByTime = true,
-    HopInterval = "1h 30m",
-    HopOnFriendJoin = true,
-    SummaryUpdateInterval = "3m",
-    DatabaseUrl = ""
-}
-
-env.ManagerSourceUrl = "https://raw.githubusercontent.com/SBeZ-Real/managerbeta/main/managerbeta"
+if apiBaseUrl == "" or sourceKey == "" then
+    warn("Thiếu ApiBaseUrl hoặc SourceAccessKey trong config local.")
+    return
+end
 
 if type(loadstring) ~= "function" then
     warn("Executor không hỗ trợ loadstring()")
     return
 end
 
-local ok, source = pcall(function()
-    return game:HttpGet(env.ManagerSourceUrl)
-end)
+local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
 
-if not ok then
-    warn("Không tải được source: " .. tostring(source))
+if type(httpRequest) ~= "function" then
+    warn("Executor không hỗ trợ request có Header Authorization.")
     return
 end
 
-if type(source) ~= "string" or source == "" or source:match("^%s*404") or source:match("^%s*Not Found") then
-    warn("URL source không hợp lệ hoặc không có quyền truy cập")
+local ok, response = pcall(function()
+    return httpRequest({
+        Url = apiBaseUrl .. "/client/source",
+        Method = "GET",
+        Headers = {
+            ["Authorization"] = "Bearer " .. sourceKey
+        }
+    })
+end)
+
+if not ok or type(response) ~= "table" then
+    warn("Không kết nối được API source: " .. tostring(response))
+    return
+end
+
+local statusCode = tonumber(response.StatusCode or response.Status) or 0
+local source = response.Body
+
+if statusCode ~= 200 or type(source) ~= "string" or source == "" or source:match("^%s*404") or source:match("^%s*Not Found") then
+    warn("Không tải được source riêng tư. HTTP: " .. tostring(statusCode))
     return
 end
 
@@ -41,4 +55,8 @@ if type(scriptFunction) ~= "function" then
     return
 end
 
-scriptFunction()
+local ran, runError = pcall(scriptFunction)
+
+if not ran then
+    warn("Lỗi khi chạy manager source: " .. tostring(runError))
+end
