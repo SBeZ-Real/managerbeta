@@ -1,7 +1,10 @@
 local shared = type(getgenv) == "function" and getgenv() or _G
 shared.ManagerConfig = type(shared.ManagerConfig) == "table" and shared.ManagerConfig or {}
 local config = shared.ManagerConfig
-config.ApiUrl = tostring(config.ApiUrl or "https://managerbeta-api.spcfy.eu"):gsub("/+$", "")
+config.ApiUrl = tostring(config.ApiUrl or ""):gsub("/+$", "")
+if config.ApiUrl == "" or config.ApiUrl == "https://managerbeta-api.spcfy.eu" then
+    config.ApiUrl = "https://anymanager.spcfy.eu"
+end
 config.LicenseKey = tostring(config.LicenseKey or "")
 config.CloudName = config.CloudName or ""
 config.AutoHopByTime = config.AutoHopByTime ~= false
