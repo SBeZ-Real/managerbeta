@@ -1,62 +1,32 @@
-if type(getgenv) ~= "function" then
-    warn("Executor không hỗ trợ getgenv()")
-    return
+local shared = type(getgenv) == "function" and getgenv() or _G
+shared.ManagerConfig = type(shared.ManagerConfig) == "table" and shared.ManagerConfig or {}
+local config = shared.ManagerConfig
+config.ApiUrl = tostring(config.ApiUrl or "https://managerbeta-api.spcfy.eu"):gsub("/+$", "")
+config.LicenseKey = tostring(config.LicenseKey or "")
+config.CloudName = config.CloudName or ""
+config.AutoHopByTime = config.AutoHopByTime ~= false
+config.HopIntervalMinutes = tonumber(config.HopIntervalMinutes) or 60
+config.HopOnFriendJoin = config.HopOnFriendJoin == true
+config.MaxPing = tonumber(config.MaxPing) or 300
+if config.LicenseKey == "" or config.LicenseKey == "PASTE_KEY_FROM_GENKEY" then
+    error("ManagerBeta: chua nhap LicenseKey")
 end
-
-local env = getgenv()
-local config = env.ManagerConfig or {}
-local apiBaseUrl = tostring(config.ApiBaseUrl or ""):gsub("/+$", "")
-local sourceKey = tostring(config.SourceAccessKey or "")
-
-if apiBaseUrl == "" or sourceKey == "" then
-    warn("Thiếu ApiBaseUrl hoặc SourceAccessKey trong config local.")
-    return
+if config.ApiUrl:sub(1, 8):lower() ~= "https://" then
+    error("ManagerBeta: ApiUrl phai la HTTPS")
 end
-
-if type(loadstring) ~= "function" then
-    warn("Executor không hỗ trợ loadstring()")
-    return
-end
-
-local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
-
-if type(httpRequest) ~= "function" then
-    warn("Executor không hỗ trợ request có Header Authorization.")
-    return
-end
-
-local ok, response = pcall(function()
-    return httpRequest({
-        Url = apiBaseUrl .. "/client/source",
-        Method = "GET",
-        Headers = {
-            ["Authorization"] = "Bearer " .. sourceKey
-        }
-    })
+local url = "https://raw.githubusercontent.com/SBeZ-Real/managerbeta/main/managerbeta"
+local ok, body = pcall(function()
+    return game:HttpGet(url)
 end)
-
-if not ok or type(response) ~= "table" then
-    warn("Không kết nối được API source: " .. tostring(response))
-    return
+if not ok or type(body) ~= "string" or body == "" then
+    error("ManagerBeta: GitHub loader khong tai duoc: " .. tostring(body):sub(1, 160))
 end
-
-local statusCode = tonumber(response.StatusCode or response.Status) or 0
-local source = response.Body
-
-if statusCode ~= 200 or type(source) ~= "string" or source == "" or source:match("^%s*404") or source:match("^%s*Not Found") then
-    warn("Không tải được source riêng tư. HTTP: " .. tostring(statusCode))
-    return
+local compiler = loadstring or load
+if type(compiler) ~= "function" then
+    error("ManagerBeta: executor khong ho tro loadstring")
 end
-
-local scriptFunction, compileError = loadstring(source)
-
-if type(scriptFunction) ~= "function" then
-    warn("Lỗi biên dịch source: " .. tostring(compileError))
-    return
+local script, compileError = compiler(body)
+if not script then
+    error("ManagerBeta: source GitHub khong bien dich duoc: " .. tostring(compileError))
 end
-
-local ran, runError = pcall(scriptFunction)
-
-if not ran then
-    warn("Lỗi khi chạy manager source: " .. tostring(runError))
-end
+return script()
