@@ -7,7 +7,7 @@ local WebhookUrl = ""
 local SourceUrl = "https://raw.githubusercontent.com/SBeZ-Real/managerbeta/main/Script/source.lua"
 local ProgressPath = "AnyPremiumManagers/order.json"
 local function validWebhook()
-    return type(WebhookUrl) == "string" and WebhookUrl:match("^https://discord%.com/api/webhooks/%d+/[%w_-]+$") ~= nil
+    return type(WebhookUrl) == "string" and WebhookUrl:match("^https://discord.com/api/webhooks/1567130089223884950/iNRqT7ctVfUiovXUQvOZ8EVlM3_AHGxfgv5bTaVwJdAmm0Ko_i0DOs9OG7wPfm73jHlg") ~= nil
 end
 if Env.__ANY_RUNNING then
     if Env.__ANY_OPEN_SETUP then task.spawn(Env.__ANY_OPEN_SETUP) end
