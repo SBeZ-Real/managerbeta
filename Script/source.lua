@@ -4,10 +4,22 @@ local Players = game:GetService("Players")
 local User = Players.LocalPlayer
 local Request = (syn and syn.request) or (http and http.request) or http_request or request
 local WebhookUrl = ""
+local WebhookPath = "AnyPremiumManagers/webhook.txt"
 local SourceUrl = "https://raw.githubusercontent.com/SBeZ-Real/managerbeta/main/Script/source.lua"
 local ProgressPath = "AnyPremiumManagers/order.json"
+local function normalizeWebhook(value)
+    local url = type(value) == "string" and value:match("^%s*(.-)%s*$") or ""
+    if #url > 256 then return nil end
+    local id, token = url:match("^https://discord%.com/api/webhooks/(%d+)/([%w_%-]+)$")
+    if not id or #id < 16 or #id > 22 or not token or #token < 30 then return nil end
+    return url
+end
 local function validWebhook()
-    return type(WebhookUrl) == "string" and WebhookUrl:match("^https://discord.com/api/webhooks/1567130089223884950/iNRqT7ctVfUiovXUQvOZ8EVlM3_AHGxfgv5bTaVwJdAmm0Ko_i0DOs9OG7wPfm73jHlg") ~= nil
+    return normalizeWebhook(WebhookUrl) ~= nil
+end
+if type(readfile) == "function" then
+    local ok, value = pcall(readfile, WebhookPath)
+    if ok then WebhookUrl = normalizeWebhook(value) or "" end
 end
 if Env.__ANY_RUNNING then
     if Env.__ANY_OPEN_SETUP then task.spawn(Env.__ANY_OPEN_SETUP) end
@@ -110,6 +122,104 @@ local function toast(message)
     else
         pcall(function() game:GetService("StarterGui"):SetCore("SendNotification", { Title = "Any - Premium Managers", Text = tostring(message), Duration = 5 }) end)
     end
+end
+
+local function showWebhookPrompt(onSaved)
+    if State.webhookPrompt and State.webhookPrompt.Parent then
+        State.webhookPrompt.Enabled = true
+        return
+    end
+    local ok, parent = pcall(function()
+        return (type(gethui) == "function" and gethui()) or game:GetService("CoreGui")
+    end)
+    if not ok or not parent then toast("Không thể mở màn hình nhập webhook") return end
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "AnyPremiumWebhookSetup"
+    gui.IgnoreGuiInset = true
+    gui.ResetOnSpawn = false
+    gui.DisplayOrder = 999
+    gui.Parent = parent
+    State.webhookPrompt = gui
+    local shade = Instance.new("Frame")
+    shade.Size = UDim2.fromScale(1, 1)
+    shade.BackgroundColor3 = Color3.fromRGB(5, 8, 18)
+    shade.BackgroundTransparency = 0.24
+    shade.BorderSizePixel = 0
+    shade.Parent = gui
+    local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
+    local panel = Instance.new("Frame")
+    panel.Size = UDim2.fromOffset(math.max(280, math.min(456, viewport.X - 24)), 246)
+    panel.AnchorPoint = Vector2.new(0.5, 0.5)
+    panel.Position = UDim2.fromScale(0.5, 0.5)
+    panel.BackgroundColor3 = Color3.fromRGB(18, 25, 42)
+    panel.BorderSizePixel = 0
+    panel.Parent = shade
+    Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 13)
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(71, 120, 219)
+    stroke.Parent = panel
+    local function label(value, y, height, size, color)
+        local item = Instance.new("TextLabel")
+        item.Position = UDim2.fromOffset(16, y)
+        item.Size = UDim2.new(1, -32, 0, height)
+        item.BackgroundTransparency = 1
+        item.Text = value
+        item.Font = Enum.Font.Gotham
+        item.TextSize = size
+        item.TextWrapped = true
+        item.TextColor3 = color
+        item.TextXAlignment = Enum.TextXAlignment.Left
+        item.Parent = panel
+        return item
+    end
+    local title = label("ANY  /  KẾT NỐI DISCORD", 13, 32, 18, Color3.fromRGB(231, 241, 255))
+    title.Font = Enum.Font.GothamBold
+    label("Dán URL webhook kênh báo cáo. Script lưu vào workspace để lần chạy sau tự sử dụng.", 48, 51, 12, Color3.fromRGB(170, 188, 216))
+    local input = Instance.new("TextBox")
+    input.Position = UDim2.fromOffset(16, 105)
+    input.Size = UDim2.new(1, -32, 0, 42)
+    input.BackgroundColor3 = Color3.fromRGB(31, 43, 66)
+    input.TextColor3 = Color3.fromRGB(245, 248, 255)
+    input.PlaceholderColor3 = Color3.fromRGB(130, 153, 182)
+    input.TextXAlignment = Enum.TextXAlignment.Left
+    input.TextSize = 12
+    input.Font = Enum.Font.Code
+    input.Text = ""
+    input.PlaceholderText = "https://discord.com/api/webhooks/ID/TOKEN"
+    input.ClearTextOnFocus = false
+    input.Parent = panel
+    Instance.new("UICorner", input).CornerRadius = UDim.new(0, 8)
+    local padding = Instance.new("UIPadding")
+    padding.PaddingLeft = UDim.new(0, 8)
+    padding.PaddingRight = UDim.new(0, 8)
+    padding.Parent = input
+    local status = label("", 151, 27, 12, Color3.fromRGB(255, 133, 133))
+    local save = Instance.new("TextButton")
+    save.Position = UDim2.fromOffset(16, 188)
+    save.Size = UDim2.new(1, -32, 0, 42)
+    save.BackgroundColor3 = Color3.fromRGB(51, 108, 224)
+    save.TextColor3 = Color3.fromRGB(255, 255, 255)
+    save.Font = Enum.Font.GothamBold
+    save.TextSize = 14
+    save.Text = "LƯU WEBHOOK VÀ TIẾP TỤC"
+    save.Parent = panel
+    Instance.new("UICorner", save).CornerRadius = UDim.new(0, 8)
+    save.MouseButton1Click:Connect(function()
+        local url = normalizeWebhook(input.Text)
+        if not url then status.Text = "URL webhook không đúng định dạng." return end
+        WebhookUrl = url
+        local saved = false
+        if type(writefile) == "function" then
+            saved = pcall(function()
+                if type(makefolder) == "function" then makefolder("AnyPremiumManagers") end
+                writefile(WebhookPath, url)
+            end)
+        end
+        gui:Destroy()
+        State.webhookPrompt = nil
+        toast(saved and "Webhook đã lưu trên thiết bị" or "Executor không lưu được file, sẽ hỏi lại lần sau")
+        if type(onSaved) == "function" then task.spawn(onSaved) end
+    end)
 end
 
 local function formatTime(t)
@@ -403,7 +513,7 @@ end
 
 local function beginOrder()
     if State.active or State.starting then toast("Đơn đang được xử lý") return end
-    if not validWebhook() then toast("Chưa cấu hình webhook trong source GitHub") return end
+    if not validWebhook() then showWebhookPrompt() return end
     if type(Request) ~= "function" then toast("Executor không hỗ trợ HTTP POST") return end
     local duration = chosenSeconds()
     if duration < 1 then toast("Hãy chọn thời gian trước") return end
@@ -487,6 +597,7 @@ openSetup = function()
         if not State.picker then makePicker() end
         Config:Input({ Title = "Tên đơn hàng", Placeholder = "Nhập tên đơn hàng", Callback = function(value) State.name = tostring(value or "") end })
         Config:Button({ Title = "Chọn thời gian", Desc = "Vòng quay: ngày · giờ · phút · giây", Callback = function() State.picker.Enabled = true end })
+        Config:Button({ Title = "Đổi Webhook", Desc = "Đổi URL đã lưu trong workspace", Callback = function() showWebhookPrompt() end })
         Config:Button({ Title = "Bắt Đầu Treo", Icon = "play", Callback = beginOrder })
         About:Paragraph({ Title = "Tài khoản", Desc = "@" .. User.Name .. " · " .. tostring(User.UserId) })
         About:Paragraph({ Title = "Đồng bộ", Desc = "Gửi báo cáo Discord mỗi 30 giây, chỉ tính giờ trong đúng Place." })
@@ -502,10 +613,13 @@ openSetup = function()
 end
 
 makeHud()
-Env.__ANY_OPEN_SETUP = openSetup
+Env.__ANY_OPEN_SETUP = function()
+    if validWebhook() then openSetup() else showWebhookPrompt(openSetup) end
+end
 Env.__ANY_CLEANUP = function()
     State.stopped = true
     if State.hud then pcall(function() State.hud.gui:Destroy() end) end
+    if State.webhookPrompt then pcall(function() State.webhookPrompt:Destroy() end) end
     if State.picker then pcall(function() State.picker:Destroy() end) end
     if State.window then pcall(function() State.window:Destroy() end) end
     for _, item in ipairs(State.connections) do pcall(function() item:Disconnect() end) end
@@ -533,11 +647,24 @@ if type(previous) == "table" and previous.userId == tostring(User.UserId) and ty
     State.lastHeartbeat = -math.huge
     State.nextHop = os.clock() + State.interval
     State.paused = State.placeId ~= tostring(game.PlaceId)
-    State.hud.gui.Enabled = true
-    reportDiscord("resume")
-    toast(State.paused and "Đơn đang tạm dừng vì sai Place" or "Đã khôi phục đơn đang treo")
+    State.hud.gui.Enabled = validWebhook()
+    if validWebhook() then
+        reportDiscord("resume")
+        toast(State.paused and "Đơn đang tạm dừng vì sai Place" or "Đã khôi phục đơn đang treo")
+    end
 else
-    task.spawn(openSetup)
+    if validWebhook() then task.spawn(openSetup) end
+end
+if not validWebhook() then
+    showWebhookPrompt(function()
+        if State.active then
+            State.hud.gui.Enabled = true
+            reportDiscord("resume")
+            toast(State.paused and "Đơn đang tạm dừng vì sai Place" or "Đã khôi phục đơn đang treo")
+        else
+            openSetup()
+        end
+    end)
 end
 
 local function updateHud()
