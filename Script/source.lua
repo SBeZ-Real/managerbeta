@@ -97,10 +97,12 @@ local function reportDiscord(event)
     lastRelay = os.clock()
     task.spawn(function()
         local attempts = event == "done" and 3 or 2
+        local delivered = false
         for index = 1, attempts do
             local ok, response = pcall(Request, { Url = WebhookUrl .. "?wait=true", Method = "POST", Timeout = 8, Headers = { ["Content-Type"] = "application/json" }, Body = Http:JSONEncode({ content = content, allowed_mentions = { parse = {} } }) })
             local code = ok and type(response) == "table" and tonumber(response.StatusCode or response.Status) or 0
             if code == 200 or code == 204 then
+                delivered = true
                 if event == "done" then State.doneReported = true end
                 break
             end
@@ -112,6 +114,8 @@ local function reportDiscord(event)
             end
             if index < attempts then task.wait(delayTime) end
         end
+        State.reportError = not delivered
+        if not delivered then warn("[Any] Không gửi được webhook, kiểm tra URL và kết nối Discord") end
         if event ~= "done" then State.reporting = false end
     end)
     return true
@@ -208,6 +212,7 @@ local function showWebhookPrompt(onSaved)
         local url = normalizeWebhook(input.Text)
         if not url then status.Text = "URL webhook không đúng định dạng." return end
         WebhookUrl = url
+        State.reportError = false
         local saved = false
         if type(writefile) == "function" then
             saved = pcall(function()
@@ -673,7 +678,7 @@ local function updateHud()
     State.hud.name.Text = State.name
     State.hud.time.Text = formatTime(inferred)
     State.hud.fill.Size = UDim2.fromScale(State.duration > 0 and math.clamp(1 - inferred / State.duration, 0, 1) or 0, 1)
-    State.hud.status.Text = (State.teleporting and "Đang chuyển server" or State.paused and "Chờ đồng bộ" or "Đang treo") .. "  ·  " .. tostring(State.ping or 0) .. " ms"
+    State.hud.status.Text = (State.reportError and "Báo cáo Discord lỗi" or State.teleporting and "Đang chuyển server" or State.paused and "Chờ đồng bộ" or "Đang treo") .. "  ·  " .. tostring(State.ping or 0) .. " ms"
 end
 
 table.insert(State.connections, TeleportService.TeleportInitFailed:Connect(function(player, result, message)
