@@ -21,12 +21,13 @@ if type(readfile) == "function" then
     local ok, value = pcall(readfile, WebhookPath)
     if ok then WebhookUrl = normalizeWebhook(value) or "" end
 end
-if Env.__ANY_RUNNING then
+if Env.__ANY_RUNNING and Env.__ANY_JOB_ID == tostring(game.JobId) then
     if Env.__ANY_OPEN_SETUP then task.spawn(Env.__ANY_OPEN_SETUP) end
     return
 end
 if Env.__ANY_CLEANUP then pcall(Env.__ANY_CLEANUP) end
 Env.__ANY_RUNNING = true
+Env.__ANY_JOB_ID = tostring(game.JobId)
 local TeleportService = game:GetService("TeleportService")
 local InputService = game:GetService("UserInputService")
 local Stats = game:GetService("Stats")
@@ -44,7 +45,7 @@ if type(readfile) == "function" and type(isfile) == "function" then
         if not isfile(settingsPath) then return end
         local saved = Http:JSONDecode(readfile(settingsPath))
         if type(saved) ~= "table" then return end
-        local maximum = { 30, 23, 59, 59 }
+        local maximum = { math.floor(9007199254740991 / 86400) - 1, 23, 59, 59 }
         if type(saved.selected) == "table" then
             for index = 1, 4 do
                 local value = tonumber(saved.selected[index])
@@ -372,52 +373,94 @@ local function makePicker()
     gui.Enabled = false
     gui.Parent = (gethui and gethui()) or game:GetService("CoreGui")
     local panel = Instance.new("Frame")
-    panel.Size = UDim2.fromOffset(340, 240)
-    panel.Position = UDim2.new(0.5, -170, 0.5, -120)
+    panel.Size = UDim2.fromOffset(392, 298)
+    panel.AnchorPoint = Vector2.new(0.5, 0.5)
+    panel.Position = UDim2.fromScale(0.5, 0.5)
+    local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
+    local pickerScale = Instance.new("UIScale")
+    pickerScale.Scale = math.min(1, (viewport.X - 24) / 392, (viewport.Y - 24) / 298)
+    pickerScale.Parent = panel
+    local outline = Instance.new("UIStroke")
+    outline.Color = Color3.fromRGB(70, 124, 207)
+    outline.Thickness = 1
+    outline.Parent = panel
     panel.BackgroundColor3 = Color3.fromRGB(20, 26, 39)
     panel.Parent = gui
     Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 13)
     local head = Instance.new("TextLabel")
-    head.Size = UDim2.new(1, 0, 0, 40)
+    head.Size = UDim2.new(1, 0, 0, 50)
     head.BackgroundTransparency = 1
     head.TextColor3 = Color3.new(1, 1, 1)
-    head.TextSize = 16
+    head.TextSize = 19
     head.Font = Enum.Font.GothamBold
-    head.Text = "Chọn ngày : giờ : phút : giây"
+    head.Text = "ANY  /  THIẾT LẬP THỜI GIAN"
     head.Parent = panel
-    local maximum = { 30, 23, 59, 59 }
-    local labels = { "Ngày", "Giờ", "Phút", "Giây" }
+    local maximum = { math.floor(9007199254740991 / 86400) - 1, 23, 59, 59 }
+    local labels = { "NGÀY", "GIỜ", "PHÚT", "GIÂY" }
+    local preview = Instance.new("TextLabel")
+    preview.Position = UDim2.fromOffset(20, 212)
+    preview.Size = UDim2.fromOffset(352, 30)
+    preview.BackgroundTransparency = 1
+    preview.TextColor3 = Color3.fromRGB(151, 197, 249)
+    preview.TextSize = 15
+    preview.Font = Enum.Font.Code
+    preview.TextXAlignment = Enum.TextXAlignment.Left
+    preview.Parent = panel
+    local fields = {}
+    local function updatePreview()
+        preview.Text = "Tổng: " .. formatTime(chosenSeconds())
+    end
     for index = 1, 4 do
-        local x = 12 + (index - 1) * 81
+        local x = 14 + (index - 1) * 94
         local column = Instance.new("Frame")
-        column.Position = UDim2.fromOffset(x, 50)
-        column.Size = UDim2.fromOffset(72, 136)
-        column.BackgroundColor3 = Color3.fromRGB(32, 39, 56)
+        column.Position = UDim2.fromOffset(x, 56)
+        column.Size = UDim2.fromOffset(86, 145)
+        column.BackgroundColor3 = Color3.fromRGB(27, 39, 62)
         column.Parent = panel
         Instance.new("UICorner", column).CornerRadius = UDim.new(0, 8)
         local caption = Instance.new("TextLabel")
-        caption.Size = UDim2.fromOffset(72, 23)
+        caption.Size = UDim2.fromOffset(86, 25)
         caption.BackgroundTransparency = 1
         caption.Text = labels[index]
         caption.TextColor3 = Color3.fromRGB(181, 193, 215)
         caption.TextSize = 12
         caption.Parent = column
-        local value = Instance.new("TextLabel")
-        value.Position = UDim2.fromOffset(0, 51)
-        value.Size = UDim2.fromOffset(72, 34)
-        value.BackgroundTransparency = 1
+        local value = Instance.new("TextBox")
+        value.Position = UDim2.fromOffset(5, 52)
+        value.Size = UDim2.fromOffset(76, 37)
+        value.BackgroundColor3 = Color3.fromRGB(35, 52, 79)
+        value.ClearTextOnFocus = false
+        value.TextScaled = true
+        value.TextXAlignment = Enum.TextXAlignment.Center
+        Instance.new("UICorner", value).CornerRadius = UDim.new(0, 7)
         value.TextColor3 = Color3.new(1, 1, 1)
         value.Font = Enum.Font.GothamBold
-        value.TextSize = 26
+        value.TextSize = 23
         value.Parent = column
+        fields[index] = value
         local function update(delta)
-            State.selected[index] = (State.selected[index] + delta + maximum[index] + 1) % (maximum[index] + 1)
-            value.Text = string.format("%02d", State.selected[index])
+            if index == 1 then
+                State.selected[index] = math.min(maximum[index], math.max(0, State.selected[index] + delta))
+            else
+                State.selected[index] = (State.selected[index] + delta + maximum[index] + 1) % (maximum[index] + 1)
+            end
+            value.Text = index == 1 and tostring(State.selected[index]) or string.format("%02d", State.selected[index])
+            updatePreview()
         end
+        value.FocusLost:Connect(function()
+            local text = tostring(value.Text)
+            local parsed = text:match("^%d+$") and #text <= 16 and tonumber(text) or nil
+            if parsed and parsed == math.floor(parsed) and parsed >= 0 and parsed <= maximum[index] then
+                State.selected[index] = parsed
+            else
+                toast("Thời gian không hợp lệ: " .. labels[index])
+            end
+            update(0)
+        end)
         local function arrow(text, y, delta)
             local b = Instance.new("TextButton")
-            b.Position = UDim2.fromOffset(4, y)
-            b.Size = UDim2.fromOffset(64, 24)
+            b.Position = UDim2.fromOffset(5, y)
+            b.Size = UDim2.fromOffset(76, 24)
             b.Text = text
             b.TextSize = 17
             b.TextColor3 = Color3.fromRGB(153, 192, 255)
@@ -425,24 +468,33 @@ local function makePicker()
             b.Parent = column
             b.MouseButton1Click:Connect(function() update(delta) end)
         end
-        arrow("▲", 24, 1)
-        arrow("▼", 98, -1)
+        arrow("▲", 25, 1)
+        arrow("▼", 109, -1)
         column.InputChanged:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseWheel then update(input.Position.Z > 0 and 1 or -1) end
         end)
         update(0)
     end
     local done = Instance.new("TextButton")
-    done.Position = UDim2.fromOffset(30, 195)
-    done.Size = UDim2.fromOffset(280, 34)
-    done.Text = "Xác nhận thời gian"
+    done.Position = UDim2.fromOffset(20, 251)
+    done.Size = UDim2.fromOffset(352, 38)
+    done.Text = "XÁC NHẬN THỜI GIAN"
     done.Font = Enum.Font.GothamBold
     done.TextColor3 = Color3.new(1, 1, 1)
     done.BackgroundColor3 = Color3.fromRGB(48, 97, 207)
     done.Parent = panel
     Instance.new("UICorner", done).CornerRadius = UDim.new(0, 9)
     done.MouseButton1Click:Connect(function()
-        if chosenSeconds() < 1 then toast("Thời gian phải lớn hơn 0") return end
+        for index, field in ipairs(fields) do
+            local raw = tostring(field.Text)
+            local number = raw:match("^%d+$") and #raw <= 16 and tonumber(raw) or nil
+            if not number or number ~= math.floor(number) or number < 0 or number > maximum[index] then
+                toast("Giá trị không hợp lệ: " .. labels[index])
+                return
+            end
+            State.selected[index] = number
+        end
+        if chosenSeconds() < 1 or chosenSeconds() > 9007199254740991 then toast("Thời gian không hợp lệ") return end
         gui.Enabled = false
         persistSettings()
         toast("Thời gian đã chọn: " .. formatTime(chosenSeconds()))
@@ -474,17 +526,16 @@ hop = function(reason)
     for _, at in ipairs(State.hops) do if now - at < 600 then table.insert(fresh, at) end end
     State.hops = fresh
     if #fresh >= 5 then toast("Giới hạn 5 lần hop mỗi 10 phút để tránh vòng lặp") return false end
-    local queue = queue_on_teleport or (syn and syn.queue_on_teleport)
-    if type(queue) ~= "function" then toast("Executor thiếu queue_on_teleport, đã bỏ qua tự hop") return false end
     local server = getServer()
     if not server then toast("Không tìm được server mới") return false end
     table.insert(State.hops, now)
     reportDiscord("heartbeat")
     saveProgress()
     State.teleporting = true
-    local bootstrap = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/SBeZ-Real/managerbeta/main/Script/source.lua"))()'
-    local queued = pcall(queue, bootstrap)
-    if not queued then State.teleporting = false toast("Không thể chuẩn bị loader sau hop") return false end
+    pcall(function()
+        TeleportService:SetTeleportSetting("AnyPremiumOrder", { userId = tostring(User.UserId), runId = State.runId, orderId = State.orderId, name = State.name, duration = State.duration, elapsed = State.elapsed, placeId = State.placeId, sequence = State.sequence })
+    end)
+    toast("Đã lưu tiến trình; hop không tự chạy lại script")
     local ok, err = pcall(function() TeleportService:TeleportToPlaceInstance(game.PlaceId, server, User) end)
     if not ok then State.teleporting = false toast("Teleport thất bại: " .. tostring(err)) return false end
     task.delay(25, function() State.teleporting = false end)
@@ -521,7 +572,7 @@ local function beginOrder()
     if not validWebhook() then showWebhookPrompt() return end
     if type(Request) ~= "function" then toast("Executor không hỗ trợ HTTP POST") return end
     local duration = chosenSeconds()
-    if duration < 1 then toast("Hãy chọn thời gian trước") return end
+    if duration < 1 or duration > 9007199254740991 then toast("Thời gian không hợp lệ") return end
     local name = State.name:gsub("^%s+", ""):gsub("%s+$", "")
     if name == "" then toast("Hãy nhập tên đơn hàng") return end
     State.starting = true
@@ -601,7 +652,7 @@ openSetup = function()
         local About = Window:Tab({ Title = "Trạng thái", Icon = "activity" })
         if not State.picker then makePicker() end
         Config:Input({ Title = "Tên đơn hàng", Placeholder = "Nhập tên đơn hàng", Callback = function(value) State.name = tostring(value or "") end })
-        Config:Button({ Title = "Chọn thời gian", Desc = "Vòng quay: ngày · giờ · phút · giây", Callback = function() State.picker.Enabled = true end })
+        Config:Button({ Title = "Chọn thời gian", Desc = "Nhập số ngày tự do, chỉnh giờ · phút · giây", Callback = function() State.picker.Enabled = true end })
         Config:Button({ Title = "Đổi Webhook", Desc = "Đổi URL đã lưu trong workspace", Callback = function() showWebhookPrompt() end })
         Config:Button({ Title = "Bắt Đầu Treo", Icon = "play", Callback = beginOrder })
         About:Paragraph({ Title = "Tài khoản", Desc = "@" .. User.Name .. " · " .. tostring(User.UserId) })
@@ -629,6 +680,7 @@ Env.__ANY_CLEANUP = function()
     if State.window then pcall(function() State.window:Destroy() end) end
     for _, item in ipairs(State.connections) do pcall(function() item:Disconnect() end) end
     Env.__ANY_RUNNING = nil
+    Env.__ANY_JOB_ID = nil
     Env.__ANY_OPEN_SETUP = nil
 end
 State.hud.gui.Enabled = false
@@ -638,7 +690,8 @@ if type(isfile) == "function" and type(readfile) == "function" then
         if isfile(ProgressPath) then previous = Http:JSONDecode(readfile(ProgressPath)) end
     end)
 end
-if type(previous) == "table" and previous.userId == tostring(User.UserId) and type(previous.runId) == "string" and type(previous.duration) == "number" and type(previous.elapsed) == "number" and previous.elapsed < previous.duration and previous.duration >= 1 then
+if type(previous) ~= "table" then pcall(function() previous = TeleportService:GetTeleportSetting("AnyPremiumOrder") end) end
+if type(previous) == "table" and previous.userId == tostring(User.UserId) and type(previous.runId) == "string" and type(previous.duration) == "number" and type(previous.elapsed) == "number" and previous.elapsed < previous.duration and previous.duration >= 1 and previous.duration <= 9007199254740991 then
     State.active = true
     State.name = tostring(previous.name or "Đơn đang treo"):sub(1, 80)
     State.orderId = tostring(previous.orderId or "")
