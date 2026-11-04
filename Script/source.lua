@@ -88,20 +88,29 @@ local lastRelay = -math.huge
 local function reportDiscord(event)
     if not State.active or not validWebhook() or type(Request) ~= "function" then return false end
     if event == "heartbeat" and os.clock() - lastRelay < 30 then return false end
-    if State.reporting and event ~= "done" then return false end
-    if event ~= "done" then State.reporting = true end
+    if State.reporting and event ~= "done" then
+        if os.clock() - (State.reportStartedAt or os.clock()) < 25 then return false end
+        State.reporting = false
+    end
+    if event ~= "done" then
+        State.reporting = true
+        State.reportStartedAt = os.clock()
+    end
     State.sequence += 1
     saveProgress()
     local sequence = State.sequence
+    if event ~= "done" then State.reportStartedSequence = sequence end
     local payload = { event = event, userId = tostring(User.UserId), username = User.Name, orderId = State.orderId, orderName = State.name, placeId = State.placeId, currentPlaceId = tostring(game.PlaceId), jobId = tostring(game.JobId), durationSeconds = math.floor(State.duration), elapsedSeconds = math.floor(State.elapsed), ping = State.ping, sentAt = DateTime.now().UnixTimestamp, runId = State.runId, seq = sequence }
     local content = "ANY|" .. base64(Http:JSONEncode(payload))
     lastRelay = os.clock()
     task.spawn(function()
         local attempts = event == "done" and 3 or 2
         local delivered = false
+        local lastCode = 0
         for index = 1, attempts do
             local ok, response = pcall(Request, { Url = WebhookUrl .. "?wait=true", Method = "POST", Timeout = 8, Headers = { ["Content-Type"] = "application/json" }, Body = Http:JSONEncode({ content = content, allowed_mentions = { parse = {} } }) })
             local code = ok and type(response) == "table" and tonumber(response.StatusCode or response.Status) or 0
+            lastCode = code
             if code == 200 or code == 204 then
                 delivered = true
                 if event == "done" then State.doneReported = true end
@@ -115,9 +124,14 @@ local function reportDiscord(event)
             end
             if index < attempts then task.wait(delayTime) end
         end
-        State.reportError = not delivered
-        if not delivered then warn("[Any] Không gửi được webhook, kiểm tra URL và kết nối Discord") end
-        if event ~= "done" then State.reporting = false end
+        if not State.lastReportStatusSequence or sequence >= State.lastReportStatusSequence then
+            State.lastReportStatusSequence = sequence
+            State.reportError = not delivered
+            State.lastResponseCode = lastCode
+            if delivered then State.lastDeliveryAt = os.clock() end
+        end
+        if not delivered then warn("[Any] Webhook POST failed, HTTP " .. tostring(lastCode)) end
+        if event ~= "done" and State.reportStartedSequence == sequence then State.reporting = false end
     end)
     return true
 end
@@ -731,7 +745,8 @@ local function updateHud()
     State.hud.name.Text = State.name
     State.hud.time.Text = formatTime(inferred)
     State.hud.fill.Size = UDim2.fromScale(State.duration > 0 and math.clamp(1 - inferred / State.duration, 0, 1) or 0, 1)
-    State.hud.status.Text = (State.reportError and "Báo cáo Discord lỗi" or State.teleporting and "Đang chuyển server" or State.paused and "Chờ đồng bộ" or "Đang treo") .. "  ·  " .. tostring(State.ping or 0) .. " ms"
+    local reportStatus = State.reportError and (" · Webhook " .. tostring(State.lastResponseCode or 0)) or State.lastDeliveryAt and (" · Post " .. tostring(math.floor(os.clock() - State.lastDeliveryAt)) .. "s") or " · Chưa gửi"
+    State.hud.status.Text = (State.teleporting and "Đang chuyển server" or State.paused and "Chờ đồng bộ" or "Đang treo") .. " · " .. tostring(State.ping or 0) .. "ms" .. reportStatus
 end
 
 table.insert(State.connections, TeleportService.TeleportInitFailed:Connect(function(player, result, message)
