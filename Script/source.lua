@@ -35,7 +35,7 @@ local settingsPath = "AnyPremiumManagers/settings.json"
 local function persistSettings()
     if type(writefile) ~= "function" then return end
     pcall(function()
-        if type(makefolder) == "function" then makefolder("AnyPremiumManagers") end
+        if type(makefolder) == "function" then pcall(makefolder, "AnyPremiumManagers") end
         writefile(settingsPath, Http:JSONEncode({ selected = State.selected, periodic = State.periodic, friend = State.friend, interval = State.interval }))
     end)
 end
@@ -59,7 +59,7 @@ end
 local function saveProgress()
     if not State.active or type(writefile) ~= "function" then return end
     pcall(function()
-        if type(makefolder) == "function" then makefolder("AnyPremiumManagers") end
+        if type(makefolder) == "function" then pcall(makefolder, "AnyPremiumManagers") end
         writefile(ProgressPath, Http:JSONEncode({ userId = tostring(User.UserId), runId = State.runId, orderId = State.orderId, name = State.name, duration = State.duration, elapsed = State.elapsed, placeId = State.placeId, sequence = State.sequence, selected = State.selected, savedAt = DateTime.now().UnixTimestamp }))
     end)
 end
@@ -216,7 +216,7 @@ local function showWebhookPrompt(onSaved)
         local saved = false
         if type(writefile) == "function" then
             saved = pcall(function()
-                if type(makefolder) == "function" then makefolder("AnyPremiumManagers") end
+                if type(makefolder) == "function" then pcall(makefolder, "AnyPremiumManagers") end
                 writefile(WebhookPath, url)
             end)
         end
@@ -575,7 +575,7 @@ openSetup = function()
             ok, loaded = pcall(function() return loadstring(source)() end)
             if ok and type(loaded) == "table" and type(writefile) == "function" then
                 pcall(function()
-                    if type(makefolder) == "function" then makefolder("AnyPremiumManagers") end
+                    if type(makefolder) == "function" then pcall(makefolder, "AnyPremiumManagers") end
                     writefile(cachePath, source)
                 end)
             end
