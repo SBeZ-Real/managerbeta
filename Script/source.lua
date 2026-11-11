@@ -100,7 +100,7 @@ local function reportDiscord(event)
     saveProgress()
     local sequence = State.sequence
     if event ~= "done" then State.reportStartedSequence = sequence end
-    local payload = { event = event, userId = tostring(User.UserId), username = User.Name, orderId = State.orderId, orderName = State.name, placeId = State.placeId, currentPlaceId = tostring(game.PlaceId), jobId = tostring(game.JobId), durationSeconds = math.floor(State.duration), elapsedSeconds = math.floor(State.elapsed), ping = State.ping, sentAt = DateTime.now().UnixTimestamp, runId = State.runId, seq = sequence }
+    local payload = { event = event, userId = tostring(User.UserId), username = User.Name, orderId = State.orderId, orderName = State.name, placeId = State.placeId, currentPlaceId = tostring(game.PlaceId), jobId = tostring(game.JobId), durationSeconds = math.floor(State.duration), elapsedSeconds = math.floor(State.elapsed), paused = State.paused == true or State.teleporting == true, ping = State.ping, sentAt = DateTime.now().UnixTimestamp, runId = State.runId, seq = sequence }
     local content = "ANY|" .. base64(Http:JSONEncode(payload))
     lastRelay = os.clock()
     task.spawn(function()
@@ -543,9 +543,10 @@ hop = function(reason)
     local server = getServer()
     if not server then toast("Không tìm được server mới") return false end
     table.insert(State.hops, now)
+    State.teleporting = true
+    State.paused = true
     reportDiscord("heartbeat")
     saveProgress()
-    State.teleporting = true
     pcall(function()
         TeleportService:SetTeleportSetting("AnyPremiumOrder", { userId = tostring(User.UserId), runId = State.runId, orderId = State.orderId, name = State.name, duration = State.duration, elapsed = State.elapsed, placeId = State.placeId, sequence = State.sequence })
     end)
